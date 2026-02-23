@@ -253,6 +253,22 @@ OpenAI-compatible Completions API."
              (plist-get tool-call :name)
              (truncate-string-to-width (prin1-to-string new-args) 50 nil nil t)))))
 
+(cl-defgeneric gptel--parse-tool-calls (backend calls)
+  "Return a BACKEND appropriate prompt containing tool calls.
+
+This will be injected into the messages list in the prompt to
+send to the LLM.")
+
+(cl-defmethod gptel--parse-tool-calls ((_backend gptel-openai) tool-use)
+  "Return a prompt containing tool calls in TOOL-USE."
+  (mapcar
+   (lambda (_tool-call)
+     (list
+      :role "assistant"
+      ;; :tool_calls 
+      ))
+   tool-use))
+
 (cl-defmethod gptel--parse-tool-results ((_backend gptel-openai) tool-use)
   "Return a prompt containing tool call results in TOOL-USE."
   ;; (declare (side-effect-free t))

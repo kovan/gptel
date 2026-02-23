@@ -1613,22 +1613,34 @@ send to the LLM.")
 
 ;; FIXME(fsm) unify this with `gptel--inject-media', which is a mess
 (cl-defgeneric gptel--inject-prompt
-    (_backend data new-prompt &optional _position)
-  "Append NEW-PROMPT to existing prompts in query DATA.
+    (_backend data new-prompt &optional position)
+  "Inject NEW-PROMPT into existing prompts in query DATA.
 
 NEW-PROMPT can be a single message or a list of messages.
 
 Not implemented: if POSITION is
-- a non-negative number, insert it at that position in PROMPTS.
+- nil, append NEW-PROMPT at the end of DATA
+- a non-negative number, insert it at that position in DATA.
 - a negative number, insert it there counting from the end.
+- a list of accessors, inject it at that position.
 
 This generic implementation handles the Anthropic,
 OpenAI-compatible and Ollama message formats."
-  ;; ;TODO(fsm): implement _POSITION
   (when (keywordp (car-safe new-prompt)) ;Is new-prompt one or many?
     (setq new-prompt (list new-prompt)))
   (let ((prompts (plist-get data :messages)))
-    (plist-put data :messages (vconcat prompts new-prompt))))
+    (pcase position
+      ('nil (plist-put data :messages (vconcat prompts new-prompt)))
+      ((pred integerp)
+       (when (< position 0) (setq position (+ (length prompts) position)))
+       (plist-put data :messages (vconcat (substring prompts 0 position)
+                                          new-prompt
+                                          (substring prompts position))))
+      ((pred listp)
+       ;; Handle lists like (-1 ...)
+       (when (and (integerp (car position)) (< (car position) 0))
+         (setcar position (+ (length prompts) (car position))))))))
+
 (cl-defgeneric gptel--inject-tool-args (backend _data _tool-call new-args)
   "Replace the arguments of TOOL-CALL in query DATA with NEW-ARGS.
 
@@ -1762,6 +1774,43 @@ MACHINE is an instance of `gptel-fsm'"
    fsm)
   (run-hooks 'gptel-post-request-hook))
 
+(defvar gptel-pre-tool-call-functions nil)
+
+(defun gptel--prepare-tool-use (fsm)
+  "Run pre-tool-call-functions for FSM."
+  (when-let* ((info (gptel-fsm-info fsm))
+              (backend (plist-get info :backend))
+              ;; This function might run many times, so only act on the remaining tool calls.
+              (tool-use (cl-remove-if (lambda (tc) (plist-get tc :result))
+                                      (plist-get info :tool-use)))
+              (ntools (length tool-use))
+              (tool-idx 0))
+    (with-current-buffer (plist-get info :buffer)
+      ;; Run pre tool call functions
+      (run-hook-wrapped
+       'gptel-pre-tool-call-functions
+       (lambda (hook-func _args)
+         (dolist (tool-call tool-use)
+           (let* ((name (plist-get tool-call :name))
+                  (args (plist-get tool-call :args))
+                  ;; TODO(tool-hooks): Guard against errors
+                  (hook-func-result (funcall hook-func name args)))
+             ;; if hook-func returns :confirm, add the check
+             (when (plist-get hook-func-result :confirm)
+               ;; TODO(tool-hooks): Check for this :confirm before running
+               (plist-put tool-call :confirm t))
+             ;; if hook-func returns :args, replace the tool args
+             (when-let* ((new-args (plist-get hook-func-result :args)))
+               ;; Merge with args that are actually run
+               (gptel--merge-plists (plist-get tool-call :args) new-args)
+               ;; Merge with args in the messages array sent to the LLM
+               (gptel--inject-tool-args
+                (plist-get info :backend) (plist-get info :data)
+                tool-call new-args))
+             ;; if hook-func returns
+             
+             )))))))
+
 (defun gptel--handle-tool-use (fsm)
   "Run tool calls captured in FSM, and advance the state machine with the results."
   (when-let* ((info (gptel-fsm-info fsm))
@@ -1804,6 +1853,7 @@ MACHINE is an instance of `gptel-fsm'"
                               (gptel--json-encode (plist-get tool-call :args))
                               info)
                    (message "Unknown tool called by model: %s" name))
+               ;; TODO break here               
                (setq arg-values
                      (mapcar
                       (lambda (arg)

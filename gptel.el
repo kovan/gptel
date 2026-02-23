@@ -1765,7 +1765,7 @@ USE-MINIBUFFER is non-nil)."
                         (propertize "C-c C-c" 'face 'help-key-binding)
                         (propertize ", Cancel request: " 'face 'font-lock-string-face)
                         (propertize "C-c C-k" 'face 'help-key-binding)
-                        (propertize ", Inspect: " 'face 'font-lock-string-face)
+                        (propertize ", Set permissions: " 'face 'font-lock-string-face)
                         (propertize "C-c C-i" 'face 'help-key-binding)))
                (confirm-strings)
                ;; FIXME(tool) use a wrapper instead of a manual text-property search,
@@ -1823,6 +1823,81 @@ USE-MINIBUFFER is non-nil)."
                        (concat "Tool call(s) requested: " actions-string))
           (overlay-put ov 'keymap gptel-tool-call-actions-map)
           prompt-ov)))))
+
+;; "Don't ask again"
+;; - in this chat buffer
+;; - in this Emacs session
+;; - in this directory
+;;   - write to dir-locals?
+;;   - write to .gptel.eld?
+;;   - write a JSON file to .gptel?
+;;   - write to ~/.cache/gptel/tool-permissions?
+;;
+;; "Don't allow tool"
+;; - in this chat buffer
+;; - in this Emacs session
+;; - in this directory
+;; 
+;; - Ever (use gptel-pre-tool-hook or modify the tool's :confirm slot)
+
+(defun gptel--preferences-tool-calls (&optional response ov)
+  ""
+  (interactive (pcase-let ((`(,resp . ,o) (get-char-property-and-overlay
+                                           (point) 'gptel-tool)))
+                 (list resp o)))
+  (cl-loop for (tool-spec _arg-values _process-tool-result) in response
+           for choice =
+           (read-multiple-choice
+            (format "Preferences for tool \"%s\": " "Read"
+                    ;; (gptel-tool-name tool-spec)
+                    )
+            '((?  "Don't edit tool permissions")
+              (?y "always allow in buffer")
+              (?n "never allow in buffer")
+              (?Y "always allow in Emacs session")
+              (?N "never allow in Emacs session")
+              (?+ "always allow in project")
+              (?- "never allow in project")))
+           do
+           (pcase (car choice)
+             (?y (message "always in buffer"))
+             (?n )
+             (?Y )
+             (?N )
+             (?+ )
+             (?- )))
+  )
+
+(defun gptel--tool-inspection-buffer (tool-spec arg-values info)
+  ";TODO: "
+  (with-current-buffer (get-buffer-create "*gptel tool preview*")
+    (erase-buffer)
+    (if-let* ((funcs (cdr (assoc (gptel-tool-name tool-spec)
+                                 gptel--tool-preview-alist)))
+              ((functionp (car-safe funcs))))
+        ;;preview-teardown func   preview-handle overlay/buffer
+        (let ((preview-cleanup))
+          (setq preview-cleanup
+                (list (cadr funcs) (funcall (car funcs) arg-values info)))
+          )
+      (let ((from (point)) ov)
+        (insert (gptel--format-tool-call (gptel-tool-name tool-spec) arg-values))
+        (setq ov (make-overlay from (point)))
+        (overlay-put ov 'before-string
+                     (concat (propertize "y" 'face 'help-key-binding)
+                             ": allow in buffer, "
+                             (propertize "n" 'face 'help-key-binding)
+                             ": deny in buffer\n"
+                             (propertize "Y" 'face 'help-key-binding)
+                             ": allow in Emacs session, "
+                             (propertize "N" 'face 'help-key-binding)
+                             ": deny in Emacs session\n"
+                             (propertize "+" 'face 'help-key-binding)
+                             ": allow in project, "
+                             (propertize "-" 'face 'help-key-binding)
+                             ": deny in project\n"))
+        ))
+    ))
 
 (defun gptel--display-tool-results (tool-results info)
   "Insert TOOL-RESULTS into buffer.
