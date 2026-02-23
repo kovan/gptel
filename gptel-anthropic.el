@@ -322,6 +322,28 @@ TOOL-USE is a list of plists containing tool names, arguments and call results."
 ;; NOTE: No `gptel--inject-prompt' method required for gptel-anthropic, since
 ;; this is handled by its defgeneric implementation
 
+(cl-defmethod gptel--inject-tool-args ((_backend gptel-anthropic) data tool-call new-args)
+  "Replace the arguments of TOOL-CALL in query DATA with NEW-ARGS.
+
+BACKEND is the `gptel-backend'.  This implementation handles the
+Anthropic API."
+  ;; FIXME: We currently assume that the tool call being modified is in the last
+  ;; position in the messages array.
+  (if-let* ((messages (plist-get data :messages))
+            (entry (aref messages (1- (length messages))))
+            (contents (plist-get entry :content))
+            (id (plist-get tool-call :id))
+            (call (cl-loop for chunk across contents
+                           if (equal (plist-get chunk :id) id)
+                           return chunk
+                           finally return nil)))
+      (plist-put call :input new-args)
+    (display-warning
+     '(gptel tool-call)
+     (format "Could not inject updated tool-call arguments for tool call %s, %s"
+             (plist-get tool-call :name)
+             (truncate-string-to-width (prin1-to-string new-args) 50 nil nil t)))))
+
 ;; TODO: Remove these functions (#792)
 (defun gptel--anthropic-format-tool-id (tool-id)
   (unless tool-id

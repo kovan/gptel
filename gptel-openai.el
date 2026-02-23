@@ -230,6 +230,29 @@ Mutate state INFO with response metadata."
 ;; NOTE: No `gptel--parse-tools' method required for gptel-openai, since this is
 ;; handled by its defgeneric implementation
 
+(cl-defmethod gptel--inject-tool-args ((_backend gptel-openai) data tool-call new-args)
+  "Replace the arguments of TOOL-CALL in query DATA with NEW-ARGS.
+
+BACKEND is the `gptel-backend'.  This implementation works with the
+OpenAI-compatible Completions API."
+  ;; FIXME: We currently assume that the tool call being modified is in the last
+  ;; position in the messages array.
+  (if-let* ((messages (plist-get data :messages))
+            (entry (aref messages (1- (length messages))))
+            (calls (plist-get entry :tool_calls))
+            (id (plist-get tool-call :id))
+            (call (cl-loop for chunk across calls
+                           if (equal (plist-get chunk :id) id)
+                           return chunk
+                           finally return nil)))
+      (setf (plist-get (plist-get call :function) :arguments)
+            (gptel--json-encode new-args))
+    (display-warning
+     '(gptel tool-call)
+     (format "Could not inject updated tool-call arguments for tool call %s, %s"
+             (plist-get tool-call :name)
+             (truncate-string-to-width (prin1-to-string new-args) 50 nil nil t)))))
+
 (cl-defmethod gptel--parse-tool-results ((_backend gptel-openai) tool-use)
   "Return a prompt containing tool call results in TOOL-USE."
   ;; (declare (side-effect-free t))

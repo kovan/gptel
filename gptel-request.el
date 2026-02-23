@@ -1629,6 +1629,22 @@ OpenAI-compatible and Ollama message formats."
     (setq new-prompt (list new-prompt)))
   (let ((prompts (plist-get data :messages)))
     (plist-put data :messages (vconcat prompts new-prompt))))
+(cl-defgeneric gptel--inject-tool-args (backend _data _tool-call new-args)
+  "Replace the arguments of TOOL-CALL in query DATA with NEW-ARGS.
+
+DATA is the request payload containing the array of user and assistant
+messages, typically available as (plist-get INFO :data).  TOOL-CALL is
+the call plist as recorded by gptel's response parser(s).  NEW-ARGS is
+the replacement plist containing the new tool call arguments.
+
+BACKEND is the `gptel-backend'.  This implementation works with the
+OpenAI-compatible Completions API."
+  (display-warning
+   '(gptel tool-call)
+   (format "Editing tool call arguments is not implemented for %s.\
+  Ignoring new arguments %s"
+           (type-of backend)
+           (truncate-string-to-width (prin1-to-string new-args) 50 nil nil t))))
 
 
 ;;; State machine for driving requests

@@ -248,6 +248,31 @@ See generic implementation for full documentation."
   (let ((prompts (plist-get data :contents)))
     (plist-put data :contents (vconcat prompts (list new-prompt)))))
 
+(cl-defmethod gptel--inject-tool-args ((_backend gptel-gemini) data tool-call new-args)
+  "Replace the arguments of TOOL-CALL in query DATA with NEW-ARGS.
+
+BACKEND is the `gptel-backend'.  This implementation handles the
+Gemini API."
+  ;; FIXME: We currently assume that the tool call being modified is in the last
+  ;; position in the messages array.
+  (if-let* ((messages (plist-get data :contents))
+            (entry (aref messages (1- (length messages))))
+            (parts (plist-get entry :parts))
+            (call (cl-loop with name = (plist-get tool-call :name)
+                           with old-args = (plist-get tool-call :args)
+                           for chunk across parts
+                           if (plist-get chunk :functionCall)
+                           if (and (equal (plist-get it :name) name)
+                                   (equal (plist-get it :args) old-args))
+                           return (plist-get chunk :functionCall) end
+                           finally return nil)))
+      (plist-put call :args new-args)
+    (display-warning
+     '(gptel tool-call)
+     (format "Could not inject updated tool-call arguments for tool call %s, %s"
+             (plist-get tool-call :name)
+             (truncate-string-to-width (prin1-to-string new-args) 50 nil nil t)))))
+
 (cl-defmethod gptel--parse-list ((backend gptel-gemini) prompt-list)
   (if (consp (car prompt-list))
       (let ((full-prompt))              ; Advanced format, list of lists
